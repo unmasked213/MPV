@@ -3,25 +3,26 @@
 
 -- ➔ Allows you to seek forward or backward by 5% of the video duration.
 --    Also allows you to increase or decrease the playback speed.
+-- luacheck: globals mp
 
-function format_time(seconds)
+local function format_time(seconds)
     local time_str = ""
     local hours = math.floor(seconds / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
-    local seconds = math.floor(seconds % 60)
+    local secs = math.floor(seconds % 60)
     if hours > 0 then
         time_str = time_str .. hours .. "h "
     end
     if minutes > 0 then
         time_str = time_str .. minutes .. "m "
     end
-    if seconds > 0 then
-        time_str = time_str .. seconds .. "s"
+    if secs > 0 then
+        time_str = time_str .. secs .. "s"
     end
     return time_str
 end
 
-function seek_percentage_forward()
+local function seek_percentage_forward()
     local duration = mp.get_property_number("duration") -- duration of the current video
     local speed = mp.get_property_number("speed") -- current playback speed
     if duration and speed then -- check if duration and speed are not nil
@@ -41,7 +42,9 @@ function seek_percentage_forward()
             if new_time then -- check if new_time is not nil
                 local remaining_time = (duration - new_time) / speed -- adjust remaining time based on playback speed
                 local percentage = math.floor((new_time / duration) * 100) -- remove decimal places
-                mp.osd_message(string.format("� %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
+                mp.osd_message(string.format(
+                    "� %s\n\nNow at: %s (%d%%)\nTime left: %s",
+                    filename, format_time(new_time), percentage, format_time(remaining_time)))
             end
         end)
     else
@@ -49,7 +52,7 @@ function seek_percentage_forward()
     end
 end
 
-function seek_percentage_backward()
+local function seek_percentage_backward()
     local duration = mp.get_property_number("duration") -- duration of the current video
     local speed = mp.get_property_number("speed") -- current playback speed
     if duration and speed then -- check if duration and speed are not nil
@@ -70,7 +73,9 @@ function seek_percentage_backward()
                 if new_time < 0 then new_time = 0 end -- if new_time is negative, set it to 0
                 local remaining_time = (duration - new_time) / speed -- adjust remaining time based on playback speed
                 local percentage = math.floor((new_time / duration) * 100) -- remove decimal places
-                mp.osd_message(string.format("� %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
+                mp.osd_message(string.format(
+                    "� %s\n\nNow at: %s (%d%%)\nTime left: %s",
+                    filename, format_time(new_time), percentage, format_time(remaining_time)))
             end
         end)
     else
@@ -85,24 +90,11 @@ mp.add_key_binding(nil, "increase_speed", function()
     local speed = mp.get_property_number("speed")
     local duration = mp.get_property_number("duration")
     local time_pos = mp.get_property_number("time-pos")
-    local time_remaining = math.floor((duration - time_pos) / speed + 0.5) -- calculate time_remaining based on current speed
-
-    local hours = math.floor(time_remaining / 3600)
-    local minutes = math.floor((time_remaining % 3600) / 60)
-    local seconds = time_remaining % 60
-
-    local time_str = ""
-    if hours > 0 then
-        time_str = string.format("%dh %02dm %02ds", hours, minutes, seconds)
-    elseif minutes > 0 then
-        time_str = string.format("%dm %02ds", minutes, seconds)
-    else
-        time_str = string.format("%ds", seconds)
-    end
 
     if speed < 1 then
         mp.set_property_number("speed", 1)
-        mp.osd_message("Video speed set to 1x\nRemaining time: " .. time_str)
+        local remaining = duration - time_pos
+        mp.osd_message("Video speed set to 1x\nRemaining time: " .. format_time(remaining))
     elseif speed == 1 then
         mp.set_property_number("speed", 10)
         local new_duration = math.floor((duration - time_pos) / 10 + 0.5)
@@ -126,24 +118,10 @@ mp.add_key_binding(nil, "reduce_speed", function()
     local speed = mp.get_property_number("speed")
     local duration = mp.get_property_number("duration")
     local time_pos = mp.get_property_number("time-pos")
-    local time_remaining = math.floor((duration - time_pos) / speed + 0.5) -- calculate time_remaining based on current speed
-
-    local hours = math.floor(time_remaining / 3600)
-    local minutes = math.floor((time_remaining % 3600) / 60)
-    local seconds = time_remaining % 60
-
-    local time_str = ""
-    if hours > 0 then
-        time_str = string.format("%dh %02dm %02ds", hours, minutes, seconds)
-    elseif minutes > 0 then
-        time_str = string.format("%dm %02ds", minutes, seconds)
-    else
-        time_str = string.format("%ds", seconds)
-    end
 
     if speed > 1 then
         mp.set_property_number("speed", 1)
-        mp.osd_message("Video speed: 1x\nRemaining time: " .. time_str)
+        mp.osd_message("Video speed: 1x\nRemaining time: " .. format_time(duration - time_pos))
     else
         local new_speed = math.floor((speed - 0.1) * 10) / 10
         if new_speed < 0.1 then new_speed = 0.1 end
