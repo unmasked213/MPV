@@ -1,5 +1,5 @@
 -- | START: nuke_file.lua
--- |  PATH: C:\Program Files\mpv\mpv\scripts\nuke_file.lua
+-- |  PATH: D:\MPV\mpv\scripts\nuke_file.lua
 
 -- ➔ Deletes the current video file and plays the next one.
 

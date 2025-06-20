@@ -1,3 +1,9 @@
+-- | START: seek_and_speed.lua
+-- |  PATH: D:\MPV\mpv\scripts\seek_and_speed.lua
+
+-- âž” Allows you to seek forward or backward by 5% of the video duration.
+--    Also allows you to increase or decrease the playback speed.
+
 function format_time(seconds)
     local time_str = ""
     local hours = math.floor(seconds / 3600)
@@ -24,10 +30,10 @@ function seek_percentage_forward()
         filename = filename:gsub('_', ' ')
         filename = filename:gsub('-', ' ')
         filename = filename:gsub('%d','')
-        filename = filename:gsub('%.%w+$', '') 
+        filename = filename:gsub('%.%w+$', '')
         filename = filename:gsub('%p','')
         filename = filename:gsub('%w+', function(w) return w:sub(1,1):upper()..w:sub(2):lower() end)
-        filename = filename:gsub('%sP$', '') 
+        filename = filename:gsub('%sP$', '')
         filename = filename:gsub('%s+', ' ')
         mp.commandv("seek", seek_amount, "relative")
         mp.add_timeout(0.05, function()
@@ -35,7 +41,7 @@ function seek_percentage_forward()
             if new_time then -- check if new_time is not nil
                 local remaining_time = (duration - new_time) / speed -- adjust remaining time based on playback speed
                 local percentage = math.floor((new_time / duration) * 100) -- remove decimal places
-                mp.osd_message(string.format("» %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
+                mp.osd_message(string.format("ï¿½ %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
             end
         end)
     else
@@ -52,10 +58,10 @@ function seek_percentage_backward()
         filename = filename:gsub('_', ' ')
         filename = filename:gsub('-', ' ')
         filename = filename:gsub('%d','')
-        filename = filename:gsub('%.%w+$', '') 
+        filename = filename:gsub('%.%w+$', '')
         filename = filename:gsub('%p','')
         filename = filename:gsub('%w+', function(w) return w:sub(1,1):upper()..w:sub(2):lower() end)
-        filename = filename:gsub('%sP$', '') 
+        filename = filename:gsub('%sP$', '')
         filename = filename:gsub('%s+', ' ')
         mp.commandv("seek", seek_amount, "relative")
         mp.add_timeout(0.05, function()
@@ -64,7 +70,7 @@ function seek_percentage_backward()
                 if new_time < 0 then new_time = 0 end -- if new_time is negative, set it to 0
                 local remaining_time = (duration - new_time) / speed -- adjust remaining time based on playback speed
                 local percentage = math.floor((new_time / duration) * 100) -- remove decimal places
-                mp.osd_message(string.format("« %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
+                mp.osd_message(string.format("ï¿½ %s\n\nNow at: %s (%d%%)\nTime left: %s", filename, format_time(new_time), percentage, format_time(remaining_time)))
             end
         end)
     else
@@ -108,11 +114,11 @@ mp.add_key_binding(nil, "increase_speed", function()
     elseif speed == 15 then
         mp.set_property_number("speed", 20)
         local new_duration = math.floor((duration - time_pos) / 20 + 0.5)
-        mp.osd_message("Video speed set to 20x\nNew video duration: " .. format_time(new_duration))		
+        mp.osd_message("Video speed set to 20x\nNew video duration: " .. format_time(new_duration))
     elseif speed == 20 then
         mp.set_property_number("speed", 25)
         local new_duration = math.floor((duration - time_pos) / 25 + 0.5)
-        mp.osd_message("Video speed set to 25x\nNew video duration: " .. format_time(new_duration))			
+        mp.osd_message("Video speed set to 25x\nNew video duration: " .. format_time(new_duration))
     end
 end)
 
@@ -158,3 +164,5 @@ mp.add_hook("on_unload", 50, function()
     print("Video unloaded. Resetting script.")
     -- Reset any variables or states here
 end)
+
+-- |   END: seek_and_speed.lua

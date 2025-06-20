@@ -1,4 +1,8 @@
--- copy_filepath.lua
+-- | START: copy_filepath.lua
+-- |  PATH: D:\MPV\mpv\scripts\copy_filepath.lua
+
+-- ➔ Copies the current video file path to the clipboard.
+
 local utils = require 'mp.utils'
 
 function copy_filepath()
@@ -13,3 +17,5 @@ function copy_filepath()
 end
 
 mp.add_key_binding("c", "copy_filepath", copy_filepath)
+
+-- |   END: copy_filepath.lua

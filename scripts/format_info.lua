@@ -1,5 +1,5 @@
 -- | START: format_info.lua
--- |  PATH: C:\Program Files\mpv\mpv\scripts\format_info.lua
+-- |  PATH: D:\MPV\mpv\scripts\format_info.lua
 
 -- ➔ Shows video details on screen.
 --   Shows the video name, how long it is, how good it looks, and how big the file is.

@@ -1,4 +1,8 @@
--- orientation_filter.lua
+-- | START: orientation_filter.lua
+-- |  PATH: D:\MPV\mpv\scripts\orientation_filter.lua
+
+-- ➔ Filters out landscape or portrait videos based on the current mode.
+
 local mp = require 'mp'
 local msg = require 'mp.msg'
 
@@ -11,10 +15,10 @@ local function format_filename(filename)
     filename = filename:gsub('_', ' ')
     filename = filename:gsub('-', ' ')
     filename = filename:gsub('%d','')
-    filename = filename:gsub('%.%w+$', '') 
+    filename = filename:gsub('%.%w+$', '')
     filename = filename:gsub('%p','')
     filename = filename:gsub('%w+', function(w) return w:sub(1,1):upper()..w:sub(2):lower() end)
-    filename = filename:gsub('%sP$', '') 
+    filename = filename:gsub('%sP$', '')
     filename = filename:gsub('%s+', ' ')
     return filename
 end
@@ -23,24 +27,24 @@ end
 local function is_landscape()
     local width = mp.get_property_number("width")
     local height = mp.get_property_number("height")
-    
+
     if not width or not height then
         msg.warn("Could not determine video dimensions")
         return false
     end
-    
+
     return width > height
 end
 
 local function is_portrait()
     local width = mp.get_property_number("width")
     local height = mp.get_property_number("height")
-    
+
     if not width or not height then
         msg.warn("Could not determine video dimensions")
         return false
     end
-    
+
     return height > width
 end
 
@@ -53,34 +57,34 @@ local function next_video_handler()
 
     local playlist_pos = mp.get_property_number("playlist-pos")
     local playlist_count = mp.get_property_number("playlist-count")
-    
+
     -- If we're at the end of the playlist, don't do anything
     if playlist_pos == playlist_count - 1 then
         local filename = format_filename(mp.get_property("filename"))
         mp.osd_message(string.format("End of playlist reached\nCurrent: %s", filename))
         return
     end
-    
+
     -- Move to next video
     mp.commandv("playlist-next", "weak")
-    
+
     -- Wait for video properties to be available
     mp.add_timeout(0.2, function()
         local width = mp.get_property_number("width")
         local height = mp.get_property_number("height")
         local filename = format_filename(mp.get_property("filename"))
-        
+
         msg.debug(string.format("Checking video: %s (%dx%d)", filename, width or 0, height or 0))
-        
+
         -- If the current video doesn't match our mode, skip it
         if (current_mode == "LANDSCAPE" and not is_landscape()) or
            (current_mode == "PORTRAIT" and not is_portrait()) then
             local skip_msg = ""
             if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
                     filename, width or 0, height or 0)
             else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
                     filename, width or 0, height or 0)
             end
             mp.osd_message(skip_msg)
@@ -97,34 +101,34 @@ local function prev_video_handler()
     end
 
     local playlist_pos = mp.get_property_number("playlist-pos")
-    
+
     -- If we're at the start of the playlist, don't do anything
     if playlist_pos == 0 then
         local filename = format_filename(mp.get_property("filename"))
         mp.osd_message(string.format("Start of playlist reached\nCurrent: %s", filename))
         return
     end
-    
+
     -- Move to previous video
     mp.commandv("playlist-prev", "weak")
-    
+
     -- Wait for video properties to be available
     mp.add_timeout(0.2, function()
         local width = mp.get_property_number("width")
         local height = mp.get_property_number("height")
         local filename = format_filename(mp.get_property("filename"))
-        
+
         msg.debug(string.format("Checking video: %s (%dx%d)", filename, width or 0, height or 0))
-        
+
         -- If the current video doesn't match our mode, skip it
         if (current_mode == "LANDSCAPE" and not is_landscape()) or
            (current_mode == "PORTRAIT" and not is_portrait()) then
             local skip_msg = ""
             if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
                     filename, width or 0, height or 0)
             else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
                     filename, width or 0, height or 0)
             end
             mp.osd_message(skip_msg)
@@ -136,7 +140,7 @@ end
 -- Function to toggle landscape-only mode
 local function toggle_landscape_mode()
     msg.info("Toggle landscape mode called, current mode: " .. current_mode)
-    
+
     -- If we're already in landscape mode, turn it off
     if current_mode == "LANDSCAPE" then
         current_mode = "OFF"
@@ -145,15 +149,15 @@ local function toggle_landscape_mode()
         -- Otherwise, enable landscape mode (regardless of what mode we were in before)
         current_mode = "LANDSCAPE"
         mp.osd_message("Landscape Only Mode: Enabled")
-        
+
         -- If enabling landscape mode and current video is portrait, skip it
         mp.add_timeout(0.2, function()
             if not is_landscape() then
                 local width = mp.get_property_number("width", 0)
                 local height = mp.get_property_number("height", 0)
                 local filename = format_filename(mp.get_property("filename"))
-                
-                mp.osd_message(string.format("Skipping portrait video: %s\nDimensions: %dx%d", 
+
+                mp.osd_message(string.format("Skipping portrait video: %s\nDimensions: %dx%d",
                     filename, width, height))
                 next_video_handler()
             end
@@ -164,7 +168,7 @@ end
 -- Function to toggle portrait-only mode
 local function toggle_portrait_mode()
     msg.info("Toggle portrait mode called, current mode: " .. current_mode)
-    
+
     -- If we're already in portrait mode, turn it off
     if current_mode == "PORTRAIT" then
         current_mode = "OFF"
@@ -173,15 +177,15 @@ local function toggle_portrait_mode()
         -- Otherwise, enable portrait mode (regardless of what mode we were in before)
         current_mode = "PORTRAIT"
         mp.osd_message("Portrait Only Mode: Enabled")
-        
+
         -- If enabling portrait mode and current video is landscape, skip it
         mp.add_timeout(0.2, function()
             if not is_portrait() then
                 local width = mp.get_property_number("width", 0)
                 local height = mp.get_property_number("height", 0)
                 local filename = format_filename(mp.get_property("filename"))
-                
-                mp.osd_message(string.format("Skipping landscape video: %s\nDimensions: %dx%d", 
+
+                mp.osd_message(string.format("Skipping landscape video: %s\nDimensions: %dx%d",
                     filename, width, height))
                 next_video_handler()
             end
@@ -192,7 +196,7 @@ end
 -- Check initial video when a mode is enabled
 mp.register_event("file-loaded", function()
     if current_mode == "OFF" then return end
-    
+
     -- Wait for video properties to be available
     mp.add_timeout(0.2, function()
         -- Skip video if it doesn't match the current mode
@@ -201,13 +205,13 @@ mp.register_event("file-loaded", function()
             local width = mp.get_property_number("width", 0)
             local height = mp.get_property_number("height", 0)
             local filename = format_filename(mp.get_property("filename"))
-            
+
             local skip_msg = ""
             if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
                     filename, width, height)
             else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d", 
+                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
                     filename, width, height)
             end
             mp.osd_message(skip_msg)
@@ -226,5 +230,5 @@ mp.register_script_message("prev_portrait", prev_video_handler)
 
 -- Debug message to confirm script is loaded
 msg.info("Orientation filter script loaded successfully")
-msg.info("Orientation filter script loaded successfully")
-msg.info("Orientation filter script loaded successfully")
+
+-- |   END: orientation_filter.lua

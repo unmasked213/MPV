@@ -1,5 +1,5 @@
 -- | START: auto_cache.lua
--- |  PATH: C:\Program Files\mpv\mpv\scripts\auto_cache.lua
+-- |  PATH: D:\MPV\mpv\scripts\auto_cache.lua
 
 -- ➔ This script protects the HDD from overworking and speeds up the SSD for smooth playback.
 --    D: drive  = HDD  = short cache (avoid wear)
