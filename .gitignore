@@ -14,7 +14,13 @@ desktop.ini
 # MPV build folders (optional cleanup)
 doc/
 installer/
-mpv/        # <-- this was part of the unpacked build, not needed
+
+# Executables and binaries (prevent GitHub push failure)
+mpv.exe
+mpv.com
+updater.bat
+*.dll
+*.bat
 
 # Unused or archived scripts
 scripts/Unused scripts for storage/
