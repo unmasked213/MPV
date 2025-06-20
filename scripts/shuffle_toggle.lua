@@ -1,3 +1,8 @@
+-- | START: shuffle_toggle.lua
+-- |  PATH: D:\MPV\mpv\scripts\shuffle_toggle.lua
+
+-- ➔ Toggles shuffle mode on and off.
+
 local shuffled = false
 local original_playlist = {}
 local original_index_map = {}
@@ -63,3 +68,5 @@ end
 
 mp.register_event("end-file", on_file_end)
 mp.add_key_binding("v", "toggle-shuffle", toggle_shuffle)
+
+-- |   END: shuffle_toggle.lua
