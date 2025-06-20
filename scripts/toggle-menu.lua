@@ -35,8 +35,8 @@ local Config = {
 
   -- UI settings
   ui = {
-    menu_width = 300,
-    menu_height = 400,
+    menu_width = 360,
+    menu_height = 320,
     corner_radius = 10,
     font_size = 20,
     menu_x = 50,
@@ -305,42 +305,40 @@ local Menu = {}
 Menu.draw = function()
   mpv.msg.info("Drawing menu overlay")
   local ass = mpv.assdraw.ass_new()
+
+  -- Background -------------------------------------------------------
   ass:new_event()
   ass:pos(Config.ui.menu_x, Config.ui.menu_y)
-
-  -- Create semi-transparent background
   ass:append(string.format("{\\bord0}{\\shad0}{\\1c&H%s&}{\\1a&H%s&}{\\p1}",
     Config.colors.background, Config.ui.transparency))
   ass:draw_start()
   ass:round_rect_cw(0, 0, Config.ui.menu_width, Config.ui.menu_height, Config.ui.corner_radius)
   ass:draw_stop()
 
-  -- Set text formatting
-  ass:append(string.format("{\\an7}{\\fs%d}{\\bord2}{\\shad0}{\\1c&H%s&}{\\3c&H000000&}{\\bord1}{\\fscx100}{\\fscy100}",
+  -- Text -------------------------------------------------------------
+  local padding = 10
+  ass:new_event()
+  ass:pos(Config.ui.menu_x + padding, Config.ui.menu_y + padding)
+  ass:append(string.format("{\\an7}{\\fs%d}{\\bord1}{\\shad0}{\\1c&H%s&}",
     Config.ui.font_size, Config.colors.default))
 
-  -- Title with icon
+  local function line(label, value)
+    ass:append(string.format("%-10s %s\\N", label .. ":", value))
+  end
+
   ass:append(string.format("🔴 %s\\N\\N", Format.title(mpv.mp.get_property("media-title", ""))))
-
-  -- Arrange items in a clear two-column layout with related items paired
-  ass:append(string.format("Status:    %-15s Position:  %s\\N",
-    Format.playback_state(), Format.position()))
-
-  ass:append(string.format("Remaining: %-15s Speed:     %s\\N",
-    Format.time_remaining(), Format.speed()))
-
-  ass:append(string.format("Quality:   %-15s Size:      %s\\N",
-    Format.quality(), Format.filesize()))
-
-  ass:append(string.format("Zoom:      %-15s Pan:       %s\\N",
-    Format.zoom(), Format.pan()))
-
-  ass:append(string.format("Rotate:    %-15s Flip:      %s\\N",
-    Format.rotation(), Format.flip()))
-
-  ass:append(string.format("Audio:     %-15s Aspect:    %s\\N",
-    Format.audio(), Format.aspect()))
-
+  line("Status",    Format.playback_state())
+  line("Position",  Format.position())
+  line("Remaining", Format.time_remaining())
+  line("Speed",     Format.speed())
+  line("Quality",   Format.quality())
+  line("Size",      Format.filesize())
+  line("Zoom",      Format.zoom())
+  line("Pan",       Format.pan())
+  line("Rotate",    Format.rotation())
+  line("Flip",      Format.flip())
+  line("Audio",     Format.audio())
+  line("Aspect",    Format.aspect())
   ass:append(string.format("%s\\N", Format.shuffle()))
 
   return ass.text
