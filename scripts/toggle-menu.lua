@@ -470,5 +470,12 @@ mpv.mp.add_key_binding("Ctrl+k", "toggle_menu", Menu.toggle)
 mpv.mp.add_key_binding("j", "playlist_next_custom", Playback.next_video)
 mpv.mp.add_key_binding("k", "playlist_prev_custom", Playback.prev_video)
 
+-- Receive shuffle state updates from other scripts
+mpv.mp.register_script_message("shuffle_state", function(value)
+  mpv.msg.info("Shuffle state message received: " .. tostring(value))
+  State.shuffled = (value == "on" or value == "true" or value == "1")
+  if State.menu_visible then Menu.update() end
+end)
+
 
 -- |   END: toggle-menu.lua

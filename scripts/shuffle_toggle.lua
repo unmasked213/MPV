@@ -39,6 +39,8 @@ function apply_shuffle()
         mp.commandv("loadfile", playlist[i], "append")
     end
     shuffled = true
+    -- notify other scripts of shuffle state change
+    mp.commandv("script-message", "shuffle_state", "on")
 end
 
 function toggle_shuffle()
@@ -54,6 +56,7 @@ function toggle_shuffle()
         mp.set_property_number("playlist-pos", original_index_map[current_file])
         mp.set_property_number("time-pos", current_position)
         shuffled = false
+        mp.commandv("script-message", "shuffle_state", "off")
     else
         mp.msg.info("Applying shuffle")
         apply_shuffle()
