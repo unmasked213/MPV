@@ -1,0 +1,26 @@
+# Cache and runtime junk
+_cache/
+shader_cache/
+watch_later/
+*.log
+*.tmp
+*.bak
+
+# OS & explorer metadata
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# MPV build folders (optional cleanup)
+doc/
+installer/
+mpv/        # <-- this was part of the unpacked build, not needed
+
+# Unused or archived scripts
+scripts/Unused scripts for storage/
+MPV_Unused_Scripts/
+
+# Editor/IDE/project folders
+.vscode/
+.idea/
+*.code-workspace
