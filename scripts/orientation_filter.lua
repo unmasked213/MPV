@@ -1,234 +1,332 @@
--- | START: orientation_filter.lua
+-- | START: orientation_filter.lua (Enhanced with FFprobe indexing and critical fixes)
 -- |  PATH: D:\MPV\mpv\scripts\orientation_filter.lua
 
--- ➔ Filters out landscape or portrait videos based on the current mode.
+local mp    = require 'mp'
+local msg   = require 'mp.msg'
+local utils = require 'mp.utils'
 
-local mp = require 'mp'
-local msg = require 'mp.msg'
+---------------------------------------------------------------------
+-- Configuration -----------------------------------------------------
+---------------------------------------------------------------------
+local ENABLE_FFPROBE_INDEXING = true
+local MAX_NAVIGATION_ATTEMPTS = 50      -- bounded‑search skips before we give up
+local FFPROBE_TIMEOUT         = 5       -- seconds per probe
+local PROGRESS_UPDATE_INTERVAL= 25      -- index progress cadence
 
--- Mode state - use a simple string for clarity
-local current_mode = "OFF"  -- Options: "OFF", "LANDSCAPE", "PORTRAIT"
+---------------------------------------------------------------------
+-- State -------------------------------------------------------------
+---------------------------------------------------------------------
+local current_mode     = "OFF"   -- "OFF" | "LANDSCAPE" | "PORTRAIT"
+local orientation_index= { landscape = {}, portrait = {}, unknown = {} }
+local orientation_cache= {}      -- persistent JSON on disk
+local indexing_in_progress = false
+local active_timeouts   = {}     -- non‑navigation timers
+local active_navigation_timer = nil -- single bounded‑search timer
 
--- Function to format filename for display
-local function format_filename(filename)
-    if not filename then return "" end
-    filename = filename:gsub('_', ' ')
-    filename = filename:gsub('-', ' ')
-    filename = filename:gsub('%d','')
-    filename = filename:gsub('%.%w+$', '')
-    filename = filename:gsub('%p','')
-    filename = filename:gsub('%w+', function(w) return w:sub(1,1):upper()..w:sub(2):lower() end)
-    filename = filename:gsub('%sP$', '')
-    filename = filename:gsub('%s+', ' ')
-    return filename
+---------------------------------------------------------------------
+-- Helpers -----------------------------------------------------------
+---------------------------------------------------------------------
+local function get_cache_file_path()
+    local script_dir = mp.get_script_directory()
+    if not script_dir then
+        msg.warn("Could not determine script directory, cache disabled")
+        return nil
+    end
+    return script_dir .. "/orientation_cache.json"
 end
+local CACHE_FILE = get_cache_file_path()
 
--- Determine if current video is landscape or portrait
-local function is_landscape()
-    local width = mp.get_property_number("width")
-    local height = mp.get_property_number("height")
-
-    if not width or not height then
-        msg.warn("Could not determine video dimensions")
-        return false
-    end
-
-    return width > height
+-- managed timeout ---------------------------------------------------
+local function cleanup_timeout(id)
+    active_timeouts[id] = nil
 end
-
-local function is_portrait()
-    local width = mp.get_property_number("width")
-    local height = mp.get_property_number("height")
-
-    if not width or not height then
-        msg.warn("Could not determine video dimensions")
-        return false
-    end
-
-    return height > width
-end
-
--- Function to handle next video navigation
-local function next_video_handler()
-    if current_mode == "OFF" then
-        mp.commandv("playlist-next", "weak")
-        return
-    end
-
-    local playlist_pos = mp.get_property_number("playlist-pos")
-    local playlist_count = mp.get_property_number("playlist-count")
-
-    -- If we're at the end of the playlist, don't do anything
-    if playlist_pos == playlist_count - 1 then
-        local filename = format_filename(mp.get_property("filename"))
-        mp.osd_message(string.format("End of playlist reached\nCurrent: %s", filename))
-        return
-    end
-
-    -- Move to next video
-    mp.commandv("playlist-next", "weak")
-
-    -- Wait for video properties to be available
-    mp.add_timeout(0.2, function()
-        local width = mp.get_property_number("width")
-        local height = mp.get_property_number("height")
-        local filename = format_filename(mp.get_property("filename"))
-
-        msg.debug(string.format("Checking video: %s (%dx%d)", filename, width or 0, height or 0))
-
-        -- If the current video doesn't match our mode, skip it
-        if (current_mode == "LANDSCAPE" and not is_landscape()) or
-           (current_mode == "PORTRAIT" and not is_portrait()) then
-            local skip_msg = ""
-            if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
-                    filename, width or 0, height or 0)
-            else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
-                    filename, width or 0, height or 0)
-            end
-            mp.osd_message(skip_msg)
-            next_video_handler()
+local function add_managed_timeout(delay, fn, id)
+    id = id or tostring(math.random(10000,99999))
+    active_timeouts[id] = true
+    mp.add_timeout(delay, function()
+        if active_timeouts[id] then
+            cleanup_timeout(id)
+            fn()
         end
     end)
+    return id
 end
 
--- Function to handle previous video navigation
-local function prev_video_handler()
-    if current_mode == "OFF" then
-        mp.commandv("playlist-prev", "weak")
-        return
+-- safe IO -----------------------------------------------------------
+local function safe_file_read(path)
+    if not path then return nil end
+    local f, err = io.open(path, "r")
+    if not f then msg.debug("read error: "..(err or "?")); return nil end
+    local c = f:read("*all"); f:close(); return c
+end
+local function safe_file_write(path, content)
+    if not path or not content then return false end
+    local f, err = io.open(path, "w")
+    if not f then msg.warn("write error: "..(err or "?")); return false end
+    f:write(content); f:close(); return true
+end
+
+-- cache load/save ---------------------------------------------------
+local function load_cache()
+    if not CACHE_FILE then return end
+    local raw = safe_file_read(CACHE_FILE)
+    if not raw then return end
+    local ok, data = pcall(utils.parse_json, raw)
+    if ok and type(data)=="table" then orientation_cache = data end
+    msg.info(string.format("Loaded orientation cache (%d entries)", (function(t) local c=0; for _ in pairs(t) do c=c+1 end; return c end)(orientation_cache)))
+end
+local function save_cache()
+    if not CACHE_FILE then return end
+    local ok, json = pcall(utils.format_json, orientation_cache)
+    if not ok then msg.error("Failed to serialize cache"); return end
+    safe_file_write(CACHE_FILE, json)
+end
+
+---------------------------------------------------------------------
+-- New: cache helpers (critical fix) ---------------------------------
+---------------------------------------------------------------------
+local function get_cache_size()
+    local n = 0; for _ in pairs(orientation_cache) do n=n+1 end; return n
+end
+local function get_cached_orientation(path, finfo)
+    if not finfo or not finfo.size or not finfo.mtime then return nil end
+    local key = string.format("%s|%d|%d", path, finfo.size, finfo.mtime)
+    local entry = orientation_cache[key]
+    if entry and entry.orientation then return entry.orientation, entry.width, entry.height end
+    return nil
+end
+
+---------------------------------------------------------------------
+-- ffprobe probe -----------------------------------------------------
+---------------------------------------------------------------------
+local function get_video_dimensions_ffprobe(path)
+    if not path then return nil,nil end
+    local res = utils.subprocess({
+        args = {"ffprobe","-v","quiet","-print_format","json","-show_streams","-select_streams","v:0", path},
+        max_size = 8192,
+        timeout  = FFPROBE_TIMEOUT,
+    })
+    if res.status ~= 0 or not res.stdout then return nil,nil end
+    local ok, data = pcall(utils.parse_json, res.stdout)
+    if not ok or not data or not data.streams or not data.streams[1] then return nil,nil end
+    local s = data.streams[1]
+    local w,h = tonumber(s.width), tonumber(s.height)
+    if w and h and w>0 and h>0 then return w,h end
+    return nil,nil
+end
+
+---------------------------------------------------------------------
+-- Orientation predicates -------------------------------------------
+---------------------------------------------------------------------
+local function check_orientation_with_rotation()
+    -- use display‑aware dwidth/dheight first (MPV already rotates)
+    local dw = mp.get_property_number("dwidth")
+    local dh = mp.get_property_number("dheight")
+    if dw and dh then
+        if current_mode=="LANDSCAPE" and dw>dh then return true end
+        if current_mode=="PORTRAIT"  and dh>dw then return true end
+        return false
     end
+    -- fallback manual rotate property
+    local w = mp.get_property_number("width")
+    local h = mp.get_property_number("height")
+    local rot = mp.get_property_number("video-params/rotate",0)
+    if not w or not h then return false end
+    local ew,eh = w,h
+    if rot==90 or rot==270 then ew,eh = h,w end
+    if current_mode=="LANDSCAPE" and ew>eh then return true end
+    if current_mode=="PORTRAIT"  and eh>ew then return true end
+    return false
+end
 
-    local playlist_pos = mp.get_property_number("playlist-pos")
+---------------------------------------------------------------------
+-- Index builder (critical fixes applied) ----------------------------
+---------------------------------------------------------------------
+local function build_ffprobe_index()
+    if indexing_in_progress then return end
+    indexing_in_progress = true
 
-    -- If we're at the start of the playlist, don't do anything
-    if playlist_pos == 0 then
-        local filename = format_filename(mp.get_property("filename"))
-        mp.osd_message(string.format("Start of playlist reached\nCurrent: %s", filename))
-        return
-    end
+    local count = mp.get_property_number("playlist-count",0)
+    if count<=0 then indexing_in_progress=false; return end
 
-    -- Move to previous video
-    mp.commandv("playlist-prev", "weak")
+    orientation_index = {landscape={}, portrait={}, unknown={}}
+    mp.osd_message(string.format("Building orientation index... (0/%d)",count))
+    msg.info(string.format("Start indexing | cached=%d", get_cache_size()))
 
-    -- Wait for video properties to be available
-    mp.add_timeout(0.2, function()
-        local width = mp.get_property_number("width")
-        local height = mp.get_property_number("height")
-        local filename = format_filename(mp.get_property("filename"))
+    local stat = {processed=0,landscape=0,portrait=0,failed=0,cached=0}
 
-        msg.debug(string.format("Checking video: %s (%dx%d)", filename, width or 0, height or 0))
+    for i = 0, count - 1 do
+        local filepath = mp.get_property_native(string.format("playlist/%d/filename", i))
 
-        -- If the current video doesn't match our mode, skip it
-        if (current_mode == "LANDSCAPE" and not is_landscape()) or
-           (current_mode == "PORTRAIT" and not is_portrait()) then
-            local skip_msg = ""
-            if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
-                    filename, width or 0, height or 0)
+        if not filepath then
+            msg.warn("Missing path at index " .. i)
+            table.insert(orientation_index.unknown, i)
+            stat.failed = stat.failed + 1
+        else
+            local file_info = utils.file_info(filepath)
+            if not file_info then
+                msg.warn("file_info failed: " .. filepath)
+                table.insert(orientation_index.unknown, i)
+                stat.failed = stat.failed + 1
             else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
-                    filename, width or 0, height or 0)
+                local ori, w, h = get_cached_orientation(filepath, file_info)
+                if ori then
+                    table.insert(orientation_index[ori], i)
+                    stat[ori] = stat[ori] + 1
+                    stat.cached = stat.cached + 1
+                else
+                    w, h = get_video_dimensions_ffprobe(filepath)
+                    if w and h then
+                        local ori2 = w > h and "landscape" or "portrait"
+                        local key = string.format("%s|%d|%d", filepath, file_info.size, file_info.mtime)
+                        orientation_cache[key] = { orientation = ori2, width = w, height = h }
+                        table.insert(orientation_index[ori2], i)
+                        stat[ori2] = stat[ori2] + 1
+                    else
+                        table.insert(orientation_index.unknown, i)
+                        stat.failed = stat.failed + 1
+                    end
+                end
             end
-            mp.osd_message(skip_msg)
-            prev_video_handler()
         end
-    end)
+
+        stat.processed = stat.processed + 1
+        if stat.processed % PROGRESS_UPDATE_INTERVAL == 0 or stat.processed == count then
+            mp.osd_message(string.format(
+                "Indexing... (%d/%d) L:%d P:%d Cache:%d",
+                stat.processed, count, stat.landscape, stat.portrait, stat.cached
+            ))
+        end
+    end
+
+
+    save_cache()
+    indexing_in_progress = false
+    local summary = string.format("Index complete: %d landscape, %d portrait (%d cache)", stat.landscape, stat.portrait, stat.cached)
+    mp.osd_message(summary)
+    msg.info(summary)
 end
 
--- Function to toggle landscape-only mode
-local function toggle_landscape_mode()
-    msg.info("Toggle landscape mode called, current mode: " .. current_mode)
+---------------------------------------------------------------------
+-- Navigation --------------------------------------------------------
+---------------------------------------------------------------------
+-- indexed navigation
+local function navigate_indexed(dir)
+    if current_mode=="OFF" then return end
+    local lst = current_mode=="LANDSCAPE" and orientation_index.landscape or orientation_index.portrait
+    if #lst==0 then mp.osd_message("No "..current_mode:lower().." videos in playlist"); return end
 
-    -- If we're already in landscape mode, turn it off
-    if current_mode == "LANDSCAPE" then
-        current_mode = "OFF"
-        mp.osd_message("Landscape Only Mode: Disabled")
+    local cur = mp.get_property_number("playlist-pos",0)
+    local target
+    if dir=="next" then
+        for _,p in ipairs(lst) do if p>cur then target=p; break end end
+        if not target then target=lst[1] end
     else
-        -- Otherwise, enable landscape mode (regardless of what mode we were in before)
-        current_mode = "LANDSCAPE"
-        mp.osd_message("Landscape Only Mode: Enabled")
+        for i=#lst,1,-1 do if lst[i]<cur then target=lst[i]; break end end
+        if not target then target=lst[#lst] end
+    end
+    if target then
+        mp.set_property_number("playlist-pos", target)
+        mp.osd_message(string.format("Jumped to %s video #%d", current_mode:lower(), target+1))
+    end
+end
 
-        -- If enabling landscape mode and current video is portrait, skip it
-        mp.add_timeout(0.2, function()
-            if not is_landscape() then
-                local width = mp.get_property_number("width", 0)
-                local height = mp.get_property_number("height", 0)
-                local filename = format_filename(mp.get_property("filename"))
+-- bounded navigation (single timer fix) ----------------------------
+local function navigate_bounded(dir)
+    -- cancel existing nav timer if any
+    if active_navigation_timer then active_navigation_timer:kill(); active_navigation_timer=nil end
 
-                mp.osd_message(string.format("Skipping portrait video: %s\nDimensions: %dx%d",
-                    filename, width, height))
-                next_video_handler()
+    local count = mp.get_property_number("playlist-count",0)
+    local start = mp.get_property_number("playlist-pos",0)
+    local attempts = 0
+
+    local function step()
+        if attempts>=MAX_NAVIGATION_ATTEMPTS then
+            mp.osd_message(string.format("No %s videos found after %d attempts", current_mode:lower(), attempts))
+            active_navigation_timer=nil
+            return
+        end
+        if dir=="next" then mp.commandv("playlist-next","weak") else mp.commandv("playlist-prev","weak") end
+        attempts = attempts + 1
+        active_navigation_timer = mp.add_timeout(0.2, function()
+            active_navigation_timer=nil
+            local cur = mp.get_property_number("playlist-pos",0)
+            if attempts>1 and cur==start then mp.osd_message("Searched entire playlist - no matches found"); return end
+            if not check_orientation_with_rotation() then
+                mp.osd_message(string.format("Skipping: %s [%d/%d]", (mp.get_property("filename") or "?"), attempts, MAX_NAVIGATION_ATTEMPTS))
+                step()
+            else
+                mp.osd_message(string.format("Found %s video: %s", current_mode:lower(), (mp.get_property("filename") or "?")))
             end
         end)
     end
+    step()
 end
 
--- Function to toggle portrait-only mode
-local function toggle_portrait_mode()
-    msg.info("Toggle portrait mode called, current mode: " .. current_mode)
+-- dispatcher --------------------------------------------------------
+local function smart_navigate(dir)
+    if current_mode=="OFF" then return end
+    if #orientation_index.landscape>0 or #orientation_index.portrait>0 then navigate_indexed(dir) else navigate_bounded(dir) end
+end
 
-    -- If we're already in portrait mode, turn it off
-    if current_mode == "PORTRAIT" then
-        current_mode = "OFF"
-        mp.osd_message("Portrait Only Mode: Disabled")
-    else
-        -- Otherwise, enable portrait mode (regardless of what mode we were in before)
-        current_mode = "PORTRAIT"
-        mp.osd_message("Portrait Only Mode: Enabled")
+local function next_video_handler() if current_mode=="OFF" then mp.commandv("playlist-next","weak") else smart_navigate("next") end end
+local function prev_video_handler() if current_mode=="OFF" then mp.commandv("playlist-prev","weak") else smart_navigate("prev") end end
 
-        -- If enabling portrait mode and current video is landscape, skip it
-        mp.add_timeout(0.2, function()
-            if not is_portrait() then
-                local width = mp.get_property_number("width", 0)
-                local height = mp.get_property_number("height", 0)
-                local filename = format_filename(mp.get_property("filename"))
-
-                mp.osd_message(string.format("Skipping landscape video: %s\nDimensions: %dx%d",
-                    filename, width, height))
-                next_video_handler()
-            end
-        end)
+---------------------------------------------------------------------
+-- Mode toggles ------------------------------------------------------
+---------------------------------------------------------------------
+local function set_mode(new_mode, friendly_name)
+    current_mode = new_mode
+    if new_mode=="OFF" then mp.osd_message(friendly_name.." Only Mode: Disabled"); return end
+    mp.osd_message(friendly_name.." Only Mode: Enabled")
+    if ENABLE_FFPROBE_INDEXING and not indexing_in_progress then
+        local tgt = new_mode=="LANDSCAPE" and orientation_index.landscape or orientation_index.portrait
+        if #tgt==0 then build_ffprobe_index() end
     end
+    add_managed_timeout(0.2,function()
+        if not check_orientation_with_rotation() then next_video_handler() end
+    end)
+end
+local function toggle_landscape_mode() set_mode(current_mode=="LANDSCAPE" and "OFF" or "LANDSCAPE","Landscape") end
+local function toggle_portrait_mode()  set_mode(current_mode=="PORTRAIT"  and "OFF" or "PORTRAIT" ,"Portrait" ) end
+
+---------------------------------------------------------------------
+-- File-loaded auto‑skip --------------------------------------------
+---------------------------------------------------------------------
+local function on_file_loaded()
+    if current_mode=="OFF" then return end
+    add_managed_timeout(0.2,function()
+        if not check_orientation_with_rotation() then next_video_handler() end
+    end)
 end
 
--- Check initial video when a mode is enabled
-mp.register_event("file-loaded", function()
-    if current_mode == "OFF" then return end
+---------------------------------------------------------------------
+-- Init / Cleanup ----------------------------------------------------
+---------------------------------------------------------------------
+local function initialize()
+    load_cache()
+    msg.info("Orientation filter initialized (FFprobe="..tostring(ENABLE_FFPROBE_INDEXING)..")")
+end
 
-    -- Wait for video properties to be available
-    mp.add_timeout(0.2, function()
-        -- Skip video if it doesn't match the current mode
-        if (current_mode == "LANDSCAPE" and not is_landscape()) or
-           (current_mode == "PORTRAIT" and not is_portrait()) then
-            local width = mp.get_property_number("width", 0)
-            local height = mp.get_property_number("height", 0)
-            local filename = format_filename(mp.get_property("filename"))
+local function cleanup()
+    if active_navigation_timer then active_navigation_timer:kill(); active_navigation_timer=nil end
+    for id in pairs(active_timeouts) do cleanup_timeout(id) end
+    msg.debug("Orientation filter cleanup completed")
+end
 
-            local skip_msg = ""
-            if current_mode == "LANDSCAPE" then
-                skip_msg = string.format("Skipping portrait video: %s\nDimensions: %dx%d",
-                    filename, width, height)
-            else
-                skip_msg = string.format("Skipping landscape video: %s\nDimensions: %dx%d",
-                    filename, width, height)
-            end
-            mp.osd_message(skip_msg)
-            next_video_handler()
-        end
-    end)
-end)
+---------------------------------------------------------------------
+-- Bindings & events -------------------------------------------------
+---------------------------------------------------------------------
+mp.register_event("file-loaded", on_file_loaded)
+mp.register_event("shutdown",    cleanup)
 
--- Register script messages with the same names as original scripts
 mp.register_script_message("toggle_landscape_mode", toggle_landscape_mode)
-mp.register_script_message("toggle_portrait_mode", toggle_portrait_mode)
-mp.register_script_message("next_landscape", next_video_handler)
-mp.register_script_message("prev_landscape", prev_video_handler)
-mp.register_script_message("next_portrait", next_video_handler)
-mp.register_script_message("prev_portrait", prev_video_handler)
+mp.register_script_message("toggle_portrait_mode",  toggle_portrait_mode)
+mp.register_script_message("next_landscape",        next_video_handler)
+mp.register_script_message("prev_landscape",        prev_video_handler)
+mp.register_script_message("next_portrait",         next_video_handler)
+mp.register_script_message("prev_portrait",         prev_video_handler)
 
--- Debug message to confirm script is loaded
-msg.info("Orientation filter script loaded successfully")
+initialize()
 
--- |   END: orientation_filter.lua
+-- | END: orientation_filter.lua
